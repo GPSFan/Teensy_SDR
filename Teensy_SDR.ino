@@ -32,11 +32,14 @@
 #include <Wire.h>
 #include <SD.h>
 #include <Encoder.h>
-#include "si5351.h"
+//#include "si5351.h"
+//#include <si5351.h>
 #include <Bounce.h>
 #include <Adafruit_GFX.h>   // LCD Core graphics library
+#include <Adafruit_ST7735.h>// 1.8" TFT Module using Samsung ST7735 chip
 //#include <Adafruit_QDTech.h>// 1.8" TFT Module using Samsung S6D02A1 chip
-#include <Adafruit_S6D02A1.h> // Hardware-specific library
+//#include <Adafruit_S6D02A1.h> // Hardware-specific library
+//#include <TFT_S6D02A1.h> // Hardware-specific library
 #include <SPI.h>
 #include "filters.h"
 
@@ -45,88 +48,127 @@
 //#define SW_AGC   // define for Loftur's SW AGC - this has to be tuned carefully for your particular implementation
 #define HW_AGC // define for codec AGC - doesn't seem to work consistently. audio library bug ?
 
-// #define CW_WATERFALL // define for experimental CW waterfall - needs faster update rate
-//#define AUDIO_STATS    // shows audio library CPU utilization etc on serial console
+//#define CW_WATERFALL // define for experimental CW waterfall - needs faster update rate
+#define AUDIO_STATS    // shows audio library CPU utilization etc on serial console
 
 extern void agc(void);      // Moved the AGC function to a separate location
 
 //SPI connections for Banggood 1.8" display
 const int8_t sclk   = 5;
 const int8_t mosi   = 4;
-const int8_t cs     = 2;
 const int8_t dc     = 3;
+const int8_t cs     = 2;
 const int8_t rst    = 1;
 
 // Switches between pin and ground for USB/LSB mode, wide and narrow filters
 const int8_t ModeSW =21;    // USB = low, LSB = high
 const int8_t FiltSW =20;    // 200 Hz CW filter = high
+const int8_t TxSW = 0;    // TX = low
 const int8_t TuneSW =6;    // low for fast tune - encoder pushbutton
 
 // unused pins 4,5, 10 (SDCS)
 
 int ncofreq  = 11000;       // IF Oscillator
+int test_freq = 700;         // test tone freq
 
 // clock generator
-Si5351 si5351;
+//Si5351 si5351;
 
 // encoder switch
 Encoder tune(16, 17);
 
-//Adafruit_QDTech tft = Adafruit_QDTech(cs, dc, mosi, sclk, rst);
+Adafruit_ST7735 tft = Adafruit_ST7735(cs, dc, mosi, sclk, rst);
 // Adafruit_S6D02A1 tft = Adafruit_S6D02A1(cs, dc, mosi, sclk, rst); // soft SPI
-Adafruit_S6D02A1 tft = Adafruit_S6D02A1(cs, dc,rst);  // hardware SPI
+//Adafruit_S6D02A1 tft = Adafruit_S6D02A1(cs, dc,rst);  // hardware SPI
 
 Metro five_sec=Metro(5000); // Set up a 5 second Metro
 Metro loo_ms = Metro(100);  // Set up a 100ms Metro
 Metro lcd_upd =Metro(100);  // Set up a Metro for LCD updates
 
-const int myInput = AUDIO_INPUT_LINEIN;
-//const int myInput = AUDIO_INPUT_MIC;
+
+
 
 // Create the Audio components.  These should be created in the
 // order data flows, inputs/sources -> processing -> outputs
 //
-
-// FIR filters
-AudioFilterFIR      Hilbert45_I(USE_FAST_FIR);
-AudioFilterFIR      Hilbert45_Q(USE_FAST_FIR);
-AudioFilterFIR      FIR_BPF(USE_FAST_FIR);
-AudioFilterFIR      postFIR(USE_FAST_FIR);
-
-AudioInputI2S       audioInput;    // Audio Shield: mic or line-in
-AudioMixer4         Summer;        // Summer (add inputs)
-AudioAnalyzeFFT256  myFFT(1);      // Spectrum Display
-AudioSynthWaveform  NCO;           // Local Oscillator
-AudioMultiplier2    Mixer;         // Mixer (multiply inputs)
-AudioPeak           Smeter;        // Measure Audio Peak for S meter
-AudioMixer4         AGC;           // Summer (add inputs)
-AudioPeak           AGCpeak;       // Measure Audio Peak for AGC use
-AudioOutputI2S      audioOutput;   // Audio Shield: headphones & line-out
-
 AudioControlSGTL5000 audioShield;  // Create an object to control the audio shield.
 
-//---------------------------------------------------------------------------------------------------------
-// Create Audio connections to build a software defined Radio Receiver
-//
-AudioConnection c1(audioInput, 0, Hilbert45_Q, 0);// Audio inputs to +/- 45 degree filters
-AudioConnection c2(audioInput, 1, Hilbert45_I, 0);
-AudioConnection c3(Hilbert45_I, 0, Summer, 0);    // Sum the shifted filter outputs to supress the image
-AudioConnection c4(Hilbert45_Q, 0, Summer, 1);
-//
-AudioConnection c10(Summer, 0, myFFT, 0);         // FFT for spectrum display
-AudioConnection c11(Summer,0, FIR_BPF, 0);        // 2.4 kHz USB or LSB filter centred at either 12.5 or 9.5 kHz
-//                                                // ( local oscillator zero beat is at 11 kHz, see NCO )
-AudioConnection c12(FIR_BPF, 0, Mixer, 0);        // IF from BPF to Mixer
-AudioConnection c13(NCO, 0, Mixer, 1);            // Local Oscillator to Mixer (11 kHz)
-//
-AudioConnection c20(Mixer, 0, postFIR, 0);        // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
-//
-AudioConnection c30(postFIR,0, Smeter, 0);        // S-Meter measure
-AudioConnection c31(postFIR,0, AGC, 0);           // AGC Gain loop adjust
-//
-AudioConnection c40(AGC, 0, AGCpeak, 0);          // AGC Gain loop measure
-AudioConnection c41(AGC, 0, audioOutput, 0);      // Output the sum on both channels 
-AudioConnection c42(AGC, 0, audioOutput, 1);
+//  RX & TX support
+const int myTx = AUDIO_INPUT_MIC;
+const int myRx = AUDIO_INPUT_LINEIN;
+
+// FIR filters
+AudioInputI2S           i2s1;           // Audio Shield: mic or line-in
+
+AudioFilterFIR          Hilbert45_I;    //Hilbert filter +45
+AudioFilterFIR          Hilbert45_Q;    //Hilbert filter -45
+
+AudioFilterFIR          FIR_BPF;        // 2.4 kHz USB or LSB filter centred at either 12.5 or 9.5 kHz
+AudioFilterFIR          postFIR_bpf_1;  // 4.8 kHz IF  filter centred at 11kHz
+AudioFilterFIR          postFIR_bpf_2;
+AudioFilterFIR          postFIR;        // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
+
+AudioSynthWaveform      test_tone;
+AudioAnalyzeFFT256      myFFT;          // Spectrum Display
+AudioSynthWaveform      sine1;          // Local Oscillator  
+AudioSynthWaveform      sine2;          // Local Oscillator 
+AudioEffectMultiply     multiply1;      // Mixer (multiply inputs)
+AudioEffectMultiply     multiply2;      // Mixer (multiply inputs)
+AudioEffectMultiply     multiply3;      // Mixer (multiply inputs)
+
+
+AudioOutputI2S          i2s2;        // Output the sum on both channels   
+AudioMixer4             Summer1;     // Summer (add inputs)
+AudioMixer4             Summer2;     // Summer (add inputs)
+AudioMixer4             Summer3;     // Summer (add inputs)
+AudioMixer4             Summer4;     // Summer (add inputs)
+
+//AudioAnalyzePeak        Smeter;        // Measure Audio Peak for S meter
+//AudioMixer4             AGC;           // Summer (add inputs)
+//AudioAnalyzePeak        AGCpeak;       // Measure Audio Peak for AGC use
+
+AudioConnection         c1(i2s1, 0, Hilbert45_I, 0);
+AudioConnection         c2(i2s1, 1, Hilbert45_Q, 0);
+
+
+AudioConnection         t1(Hilbert45_I, 0, multiply1, 0);
+AudioConnection         t2(Hilbert45_Q, 0, multiply2, 0);
+
+AudioConnection         r1(Hilbert45_I, 0, Summer1, 0);     // Sum the shifted filter outputs to supress the image
+AudioConnection         r2(Hilbert45_Q, 0, Summer1, 1);
+AudioConnection         r3(Summer1, 0, FIR_BPF, 0);         // 2.4 kHz USB or LSB filter centred at either 12.5 or 9.5 kHz
+
+AudioConnection         r3a3(Summer1, 0, Summer2, 0);         // RX FFT path
+AudioConnection         r4(FIR_BPF, 0, multiply3, 0);       // IF from BPF to Mixer
+
+AudioConnection         r5(sine1, 0, multiply3, 1);         // Local Oscillator to Mixer (11 kHz)
+AudioConnection         r6(multiply3, 0, postFIR, 0);       // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
+
+AudioConnection         c3(sine1, 0, multiply1, 1);         // Local Oscillator I to Mixer (11 kHz)
+AudioConnection         t5(sine2, 0, multiply2, 1);         // Local Oscillator Q to Mixer (11 kHz)
+
+AudioConnection         t6(multiply1, postFIR_bpf_1);       // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
+AudioConnection         t7(multiply2, postFIR_bpf_2);       // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
+AudioConnection         t8(postFIR_bpf_1, 0, Summer3, 1);
+AudioConnection         t9(postFIR_bpf_2, 0, Summer4, 1);
+
+AudioConnection         c4(Summer3, 0, i2s2, 1);
+AudioConnection         c5(Summer4, 0, i2s2, 0);
+
+AudioConnection         r7(postFIR,0, Summer3, 0);
+AudioConnection         r8(postFIR,0, Summer4, 0);
+
+//AudioConnection         r30(postFIR,0, Smeter, 0);        // S-Meter measure
+//AudioConnection         r31(postFIR,0, AGC, 0);           // AGC Gain loop adjust
+//AudioConnection         r40(AGC, 0, AGCpeak, 0);          // AGC Gain loop measure
+
+
+AudioConnection         t10(Summer3, 0, Summer2, 1);        // TX FFT path
+AudioConnection         t11(Summer4, 0, Summer2, 2);        // TX FFT path
+AudioConnection         t12(sine1, 0, Summer3, 2);
+AudioConnection         t13(sine2, 0, Summer4, 2);
+
+AudioConnection         c8(Summer2, 0, myFFT, 0);           // FFT for spectrum display
 //---------------------------------------------------------------------------------------------------------
 
 //long vfofreq=3560000;
@@ -140,20 +182,21 @@ elapsedMillis volmsec=0;
 
 void setup() 
 {
-  pinMode(0, INPUT_PULLUP); // yanks up display BL signal
+  pinMode(TxSW, INPUT_PULLUP); // Tx switch, low = Tx
   pinMode(ModeSW, INPUT_PULLUP);  // USB = low, LSB = high
   pinMode(FiltSW, INPUT_PULLUP);  // 500Hz filter = high
   pinMode(TuneSW, INPUT_PULLUP);  // tuning rate = high
   
   // Audio connections require memory to work.  For more
   // detailed information, see the MemoryAndCpuUsage example
-  AudioMemory(12);
+  AudioMemory(20);  //was 12
 
   // Enable the audio shield and set the output volume.
   audioShield.enable();
-  audioShield.inputSelect(myInput);
+  audioShield.inputSelect(myRx);
   audioShield.volume(127);
   audioShield.unmuteLineout();
+  audioShield.micGain(0);
   
 #ifdef HW_AGC
   /* COMMENTS FROM Teensy Audio library:
@@ -178,15 +221,23 @@ void setup()
 	floating point figure is dB/s rate at which gain is reduced
 */
   audioShield.autoVolumeControl(2,1,0,-5,3,10); // see comments
-  audioShield.autoVolumeEnable(1);
+  audioShield.autoVolumeEnable();
 
 #endif
 
-  // Stop the Audio stuff while manipulating parameters
+  // Stop the Audio stuff while manipulating parameters Initial setup for RX
   AudioNoInterrupts();
+
+//  test_tone.begin(1.0,2000,TONE_TYPE_SINE);
+  
+  //test_tone.amplitude(.008);
   
   // Local Oscillator at 11 kHz
-  NCO.begin(1.0,ncofreq,TONE_TYPE_SINE);
+  
+  sine1.begin(1.0,ncofreq,TONE_TYPE_SINE);
+  sine2.begin(1.0,ncofreq,TONE_TYPE_SINE);
+  
+  sine1.phase(90);
   
   // Initialize the +/-45 degree Hilbert filters
   Hilbert45_I.begin(hilbert45,HILBERT_COEFFS);
@@ -197,6 +248,11 @@ void setup()
   
   // Initialize the Low Pass filter
   postFIR.begin(postfir_lpf,COEFF_LPF);
+
+
+  // Initialize the Post Band Pass filters  
+  //postFIR_bpf_1.begin(postfir_bpf,COEFF_POST_BPF);
+  //postFIR_bpf_2.begin(postfir_bpf,COEFF_POST_BPF);
   
   // Start the Audio stuff
   AudioInterrupts(); 
@@ -208,38 +264,39 @@ void setup()
 //  tft.init();
   tft.initR(INITR_BLACKTAB);   // initialize a S6D02A1S chip, black tab
   tft.setRotation(1);
-  tft.fillScreen(S6D02A1_BLACK);
+  tft.fillScreen(ST7735_BLACK);
   tft.setCursor(0, 115);
-  tft.setTextColor(S6D02A1_WHITE);
+  tft.setTextColor(ST7735_WHITE);
   tft.setTextWrap(true);
   tft.print("Teensy 3.1 SDR");
   
   // Show mid screen tune position
-  tft.drawFastVLine(80, 0,60, S6D02A1_BLUE);
+  tft.drawFastVLine(80, 0,60, ST7735_BLUE);
   
   // Set LCD defaults
-  tft.setTextColor(S6D02A1_YELLOW);
+  tft.setTextColor(ST7735_YELLOW);
   //tft.setTextSize(2);
   // set up clk gen
 
-  si5351.init(SI5351_CRYSTAL_LOAD_8PF);
-  si5351.set_correction(-40);  // I did a by ear correction to CHU
+ // si5351.init(SI5351_CRYSTAL_LOAD_8PF);
+  //si5351.init();
+ // si5351.set_correction(-40);  // I did a by ear correction to CHU
   // Set CLK0 to output 14 MHz with a fixed PLL frequency
-  si5351.set_pll(SI5351_PLL_FIXED, SI5351_PLLA);
-  si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
+ // si5351.set_pll(SI5351_PLL_FIXED, SI5351_PLLA);
+ // si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
   delay(3);
 }
 
 
 void loop() 
 {
-  static uint8_t mode, filter,modesw_state,filtersw_state;
+  static uint8_t mode, filter, modesw_state, filtersw_state, tx, txsw_state;
   // Force a first time USB/LSB Mode and filter update
-  static uint8_t oldmode=0xff, oldfilter=0xff;
+  static uint8_t oldmode=0xff, oldfilter=0xff, oldtx=0xff;
   long encoder_change;
   char string[80];   // print format stuff
   static uint8_t waterfall[80];  // array for simple waterfall display
-  static uint8_t w_index=0,w_avg;
+  static uint8_t w_index=0, w_avg;
 
 // tune radio using encoder switch  
   encoder_pos=tune.read();
@@ -249,10 +306,10 @@ void loop()
     // press encoder button for fast tuning
     if (digitalRead(TuneSW)) vfofreq+=encoder_change*5;  // tune the master vfo - 5hz steps
     else vfofreq+=encoder_change*500;  // fast tuning 500hz steps
-    si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
-    tft.fillRect(100,115,100,120,S6D02A1_BLACK);
+//    si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
+    tft.fillRect(100,115,100,120,ST7735_BLACK);
     tft.setCursor(100, 115);
-    tft.setTextColor(S6D02A1_WHITE);
+    tft.setTextColor(ST7735_WHITE);
     cursorfreq=vfofreq+ncofreq; // frequency we are listening to
     sprintf(string,"%d.%03d.%03d",cursorfreq/1000000,(cursorfreq-cursorfreq/1000000*1000000)/1000,
           cursorfreq%1000 );
@@ -280,7 +337,15 @@ void loop()
          filtersw_state=1; // flag switch is pressed
        }
     }
-    else filtersw_state=0; // flag switch not pressed    
+    else filtersw_state=0; // flag switch not pressed
+
+    if (!digitalRead(TxSW)) {
+       if (txsw_state==0) { // switch was pressed - falling edge
+         tx=!tx; 
+         txsw_state=1; // flag switch is pressed
+       }
+    }
+    else txsw_state=0; // flag switch not pressed 
   }
 
 #ifdef SW_AGC
@@ -288,38 +353,122 @@ void loop()
 #endif  
 
   //
-  // Select USB/LSB mode and a corresponding 2.4kHz or 500Hz filter
+  // Select RX/TX, USB/LSB mode and a corresponding 2.4kHz or 500Hz filter
   //
   if (loo_ms.check() == 1)
   {
-//    mode = !digitalRead(ModeSW);
+//    mode   = !digitalRead(ModeSW);
 //    filter = !digitalRead(FiltSW);
-    if ((mode != oldmode)||(filter != oldfilter))
+    tx     = !digitalRead(TxSW);
+    if ((mode != oldmode)||(filter != oldfilter)||(tx != oldtx))
     {
       AudioNoInterrupts();   // Disable Audio while reconfiguring filters
-      tft.drawFastHLine(0,61, 160, S6D02A1_BLACK);   // Clear LCD BW indication
-      tft.drawFastHLine(0,62, 160, S6D02A1_BLACK);   // Clear LCD BW indication
+      tft.drawFastHLine(0,61, 160, ST7735_BLACK);   // Clear LCD BW indication
+      tft.drawFastHLine(0,62, 160, ST7735_BLACK);   // Clear LCD BW indication
+     if (tx)
+     {
+       // Setup TX path switches
+       
+        Summer2.gain(0,0);
+        Summer2.gain(1,1);
+        Summer2.gain(2,1);
+        Summer2.gain(3,0);
+        
+        Summer3.gain(0,0);
+        Summer3.gain(1,1);
+        Summer3.gain(2,0);
+        Summer3.gain(3,0);
+        
+        Summer4.gain(0,0);
+        Summer4.gain(1,1);
+        Summer4.gain(2,0);
+        Summer4.gain(3,0);
 
+       // Setup audio shield config for TX  
+        
+        audioShield.inputSelect(myTx);
+        audioShield.volume(127);
+        audioShield.unmuteLineout();
+        audioShield.muteHeadphone();
+        audioShield.micGain(0);
+        
+        // Reset filters for TX
+        
+        FIR_BPF.end();   // shut off RX path filters to save CPU
+        postFIR.end();   // shut off RX path filters to save CPU
+        postFIR_bpf_1.begin(postfir_bpf,COEFF_POST_BPF);  // start up TX path I filter
+        postFIR_bpf_2.begin(postfir_bpf,COEFF_POST_BPF);  // Start up TX path Q filter
+        
+        // Setup USB/LSB generator
+        
+        if (mode)
+        {
+          sine1.phase(0);
+          sine2.phase(90);
+        }
+        else
+        {
+          sine1.phase(90);
+          sine2.phase(0);
+        }
+       
+     }
+     else   //RX
+     {
+
+       // Shut off TX path filters to save CPU
+       
+        postFIR_bpf_2.end();
+        postFIR_bpf_2.end();       
+              
+       // Setup RX path switches
+       
+        Summer2.gain(0,1);
+        Summer2.gain(1,0);
+        Summer2.gain(2,0);
+        Summer2.gain(3,0);
+        
+        Summer3.gain(0,1);
+        Summer3.gain(1,0);
+        Summer3.gain(2,0);
+        Summer3.gain(3,0);
+        
+        Summer4.gain(0,1);
+        Summer4.gain(1,0);
+        Summer4.gain(2,0);
+        Summer4.gain(3,0);
+        
+       // Setup audio shield config for RX 
+       
+        audioShield.inputSelect(myRx);
+        audioShield.volume(127);
+        audioShield.muteLineout();
+        audioShield.unmuteHeadphone();
+        audioShield.lineInLevel(10);
+
+      // Filter config for RX depends on mode and filter width         
+       
       if (mode)                                     // LSB
       {
-        FIR_BPF.begin(firbpf_lsb,BPF_COEFFS);       // 2.4kHz LSB filter
-        
+        FIR_BPF.begin(firbpf_lsb,BPF_COEFFS);       // 2.4kHz LSB filter       
         if (filter)
         {
           postFIR.begin(postfir_700,COEFF_700);     // 500 Hz LSB filter
-          tft.drawFastHLine(72,61,6, S6D02A1_RED);
-          tft.drawFastHLine(72,62,6, S6D02A1_RED);
-          tft.fillRect(100, 85, 60, 7,S6D02A1_BLACK);// Print Mode
+          tft.drawFastHLine(72,61,6, ST7735_RED);
+          tft.drawFastHLine(72,62,6, ST7735_RED);
+          tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
           tft.setCursor(100, 85);
           tft.print("LSB narrow");
         }
         else
         {
           postFIR.begin(postfir_lpf,COEFF_LPF);     // 2.4kHz LSB filter
-          tft.drawFastHLine(61,61,20, S6D02A1_RED);
-          tft.drawFastHLine(61,62,20, S6D02A1_RED);
-          tft.fillRect(100, 85, 60, 7,S6D02A1_BLACK);// Print Mode
+          tft.drawFastHLine(61,61,20, ST7735_RED);
+          tft.drawFastHLine(61,62,20, ST7735_RED);
+          tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
           tft.setCursor(100, 85);
+          sine1.phase(0);
+          sine2.phase(90);
           tft.print("LSB");
         }
       }
@@ -329,36 +478,50 @@ void loop()
         if (filter)
         {
           postFIR.begin(postfir_700,COEFF_700);     // 500 Hz LSB filter
-          tft.drawFastHLine(83,61,6, S6D02A1_RED);
-          tft.drawFastHLine(83,62,6, S6D02A1_RED);
-          tft.fillRect(100, 85, 60, 7,S6D02A1_BLACK);// Print Mode
+          tft.drawFastHLine(83,61,6, ST7735_RED);
+          tft.drawFastHLine(83,62,6, ST7735_RED);
+          tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
           tft.setCursor(100, 85);
           tft.print("USB narrow");
         }
         else
         {
           postFIR.begin(postfir_lpf,COEFF_LPF);     // 2.4kHz LSB filter
-          tft.drawFastHLine(80,61,20, S6D02A1_RED);
-          tft.drawFastHLine(80,62,20, S6D02A1_RED);
-          tft.fillRect(100, 85, 60, 7,S6D02A1_BLACK);// Print Mode
+          tft.drawFastHLine(80,61,20, ST7735_RED);
+          tft.drawFastHLine(80,62,20, ST7735_RED);
+          tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
           tft.setCursor(100, 85);
+          sine1.phase(90);
+          sine2.phase(0);
           tft.print("USB");
         }
       }
+
+    }
       AudioInterrupts(); 
       oldmode = mode;
       oldfilter = filter;
-    }
+      oldtx = tx;
+    
+    } 
   }
 
   //
   // Draw Spectrum Display
   //
+  int scale = 1;
   if (lcd_upd.check() == 1)
   {
     if (myFFT.available()) 
     {
-       int scale=1;
+      if (tx)
+      {
+      scale=4;  //orig was 1 for RX, 4 works ok for TX
+      }
+      else 
+      {
+      scale=1;
+      }
        //for (int16_t x=0; x < 160; x++) 
        for (int16_t x=0; x < 160; x+=2) 
        {
@@ -367,8 +530,14 @@ void loop()
 
          if(x!=80)
          {
-           tft.drawFastVLine(x, 60-bar,bar, S6D02A1_GREEN);
-           tft.drawFastVLine(x, 0, 60-bar, S6D02A1_BLACK);    
+           if (!digitalRead(TxSW)) {
+           tft.drawFastVLine(x, 60-bar,bar, ST7735_RED);
+           }
+           else
+           {
+           tft.drawFastVLine(x, 60-bar,bar, ST7735_GREEN);
+           }
+           tft.drawFastVLine(x, 0, 60-bar, ST7735_BLACK);    
          }
       }
     } 
@@ -384,8 +553,8 @@ void loop()
     w_avg=w_avg-w_avg/20; // running average power
     int8_t p=w_index;
     for (uint8_t x=158;x>0;x-=2) {
-      if (waterfall[p] > w_avg/20+4) tft.fillRect(x,70,2,2,S6D02A1_WHITE);
-      else tft.fillRect(x,70,2,2,S6D02A1_BLACK);
+      if (waterfall[p] > w_avg/20+4) tft.fillRect(x,70,2,2,ST7735_WHITE);
+      else tft.fillRect(x,70,2,2,ST7735_BLACK);
       if (--p<0 ) p=79;
     }
     if (++w_index >=80) w_index=0;
