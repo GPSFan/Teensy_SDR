@@ -6,14 +6,16 @@
 
 #include <Adafruit_GFX.h>        // LCD Core graphics library
 //#include <Adafruit_QDTech.h>     // 1.8" TFT Module using Samsung S6D02A1 chip
-#include <Adafruit_S6D02A1.h> // Hardware-specific library
+#include <Adafruit_ST7735.h>     // 1.8" TFT Module using Samsung ST7735 chip
+//#include <Adafruit_S6D02A1.h> // Hardware-specific library
 
 //extern Adafruit_QDTech tft;
-extern Adafruit_S6D02A1 tft;
+extern Adafruit_ST7735 tft;
+//extern Adafruit_S6D02A1 tft;
 
-extern AudioMixer4     AGC;      // Summer (add inputs)
-extern AudioPeak       AGCpeak;  // Measure Audio Peak for AGC use
-extern AudioPeak       Smeter;   // Measure Audio Peak for S meter
+extern AudioMixer4            AGC;      // Summer (add inputs)
+extern AudioAnalyzePeak       AGCpeak;  // Measure Audio Peak for AGC use
+extern AudioAnalyzePeak       Smeter;   // Measure Audio Peak for S meter
 
 Metro l_ms =   Metro(1);         // Set up a 1ms Metro
 Metro lcd_upd2=Metro(100);       // Set up a Metro for LCD updates
@@ -45,12 +47,14 @@ void agc(void)
   if (l_ms.check() == 1)
   {
     // Collect S-meter data
-    s_sample = Smeter.Dpp(); // Highest sample within 1 millisecond
-    Smeter.begin();          // Reset for next measurement
+//    s_sample = Smeter.Dpp(); // Highest sample within 1 millisecond
+    s_sample = Smeter.read(); // Highest sample within 1 millisecond
+//    Smeter.begin();          // Reset for next measurement
 
     // AGC: Collect current 1ms peak at output and feed to a ringbuffer
-    sample[i++] = samp = AGCpeak.Dpp();
-    AGCpeak.begin();
+//    sample[i++] = samp = AGCpeak.Dpp();
+    sample[i++] = samp = AGCpeak.read();
+//    AGCpeak.begin();
     if (i >= AGCattack) i=0;
     
     // Check if we need to reduce gain
@@ -103,7 +107,7 @@ void agc(void)
       }
       else dbuv = 0;
       // Print S units
-      tft.fillRect(10, 85, 30, 7,S6D02A1_BLACK);
+      tft.fillRect(10, 85, 30, 7,ST7735_BLACK);
       tft.setCursor(0, 85);
       if (dbuv == 0) sprintf(string,"S:%3.1f",s);
       else sprintf(string,"S:9+%02.0f",dbuv);
@@ -112,7 +116,7 @@ void agc(void)
       if(0)  // Debug stuff
       {
         // Print AGC loop parameters
-        tft.fillRect(10, 105, 100, 7,S6D02A1_BLACK);
+        tft.fillRect(10, 105, 100, 7,ST7735_BLACK);
         tft.setCursor(0, 105);
         sprintf(string,"pk:%5lu g:%5.1f",samp, AGCgain);
         tft.print(string);
