@@ -12,6 +12,6 @@ extern short postfir_700[];
 #define COEFF_700 120
 extern short postfir_lpf[];
 
-#define COEFF_POST_BPF  60
+#define COEFF_POST_BPF  66
 extern short postfir_bpf[];
 

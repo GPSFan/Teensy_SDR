@@ -25,6 +25,6 @@ short postfir_lpf[COEFF_LPF] = {
 };
 
 short postfir_bpf[COEFF_POST_BPF] = {
-#include "postfir_bpfy.h" 
+#include "postfir_bpfz.h" 
 };
 
