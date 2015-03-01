@@ -33,7 +33,7 @@
 #include <Wire.h>
 #include <SD.h>
 #include <Encoder.h>
-#include "si5351.h"
+#include "si5351.h"  // don't use jason branch 3/1/2015
 //#include <si5351.h>
 #include <Bounce.h>
 #include <Adafruit_GFX.h>   // LCD Core graphics library
@@ -51,6 +51,9 @@
 
 //#define CW_WATERFALL // define for experimental CW waterfall - needs faster update rate
 #define AUDIO_STATS    // shows audio library CPU utilization etc on serial console
+
+//#define SI5351_FREQ_MULT	100ULL
+#define SI5351_FREQ_MULT	1ULL   // jason branch uses .01 hz steps, but tuning doesn't work, so this is 1 for now.
 
 extern void agc(void);      // Moved the AGC function to a separate location
 
@@ -280,12 +283,11 @@ void setup()
   //tft.setTextSize(2);
   // set up clk gen
 
-  si5351.init(SI5351_CRYSTAL_LOAD_8PF);
- // si5351.init();
-  si5351.set_correction(-40);  // I did a by ear correction to CHU
+  si5351.init(SI5351_CRYSTAL_LOAD_8PF);  // used 25mhz xtal from old ethernet switch so load cap in question
+  si5351.set_correction(+2250);  // I used my freq counter so it's not right on, but close,
   // Set CLK0 to output 14 MHz with a fixed PLL frequency
   si5351.set_pll(SI5351_PLL_FIXED, SI5351_PLLA);
-  si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
+  si5351.set_freq((unsigned long)vfofreq*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);
   delay(3);
 }
 
@@ -308,13 +310,14 @@ void loop()
     // press encoder button for fast tuning
     if (digitalRead(TuneSW)) vfofreq+=encoder_change*1;  // tune the master vfo - 5hz steps
     else vfofreq+=encoder_change*500;  // fast tuning 500hz steps
-    si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
+    si5351.set_freq((unsigned long)vfofreq*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);
     tft.fillRect(100,115,100,120,ST7735_BLACK);
     tft.setCursor(100, 115);
     tft.setTextColor(ST7735_WHITE);
     cursorfreq=vfofreq+ncofreq; // frequency we are listening to
     sprintf(string,"%d.%03d.%03d",cursorfreq/1000000,(cursorfreq-cursorfreq/1000000*1000000)/1000,
-          cursorfreq%1000 );
+          cursorfreq%1000 );     
+          
     tft.print(string); 
   }
 
@@ -440,7 +443,7 @@ void loop()
         Summer4.gain(2,0);
         Summer4.gain(3,0);
         
-       // Setup audio shield config for RX 
+       // Setup audio shield config for RX
        
         audioShield.inputSelect(myRx);
         audioShield.volume(127);
@@ -576,7 +579,7 @@ void loop()
     if (five_sec.check() == 1)
     {
       Serial.print("Proc = ");
-      Serial.print(AudioProcessorUsage());
+      Serial.print(AudioProcessorUsage()); //
       Serial.print(" (");    
       Serial.print(AudioProcessorUsageMax());
       Serial.print("),  Mem = ");
