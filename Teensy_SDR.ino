@@ -9,6 +9,7 @@
  * 1/15 RH - added encoder and SI5351 tuning library by Jason Milldrum <milldrum@gmail.com>
  *    - added HW AGC option which uses codec AGC module
  *    - added experimental waterfall display for CW
+ * 2/28 KM adapt to latest Audio Library, Arduino 1.6 and 1.21 of Teensyduino
  * ToDo:
  * implement transmit mode: should be able to do this by switching hilbert filters down to 300-2.7khz and adding a mixer route to line out.
  * clean up some of the hard coded HW and UI stuff 
@@ -32,7 +33,7 @@
 #include <Wire.h>
 #include <SD.h>
 #include <Encoder.h>
-//#include "si5351.h"
+#include "si5351.h"
 //#include <si5351.h>
 #include <Bounce.h>
 #include <Adafruit_GFX.h>   // LCD Core graphics library
@@ -72,7 +73,7 @@ int ncofreq  = 11000;       // IF Oscillator
 int test_freq = 700;         // test tone freq
 
 // clock generator
-//Si5351 si5351;
+Si5351 si5351;
 
 // encoder switch
 Encoder tune(16, 17);
@@ -172,12 +173,13 @@ AudioConnection         c8(Summer2, 0, myFFT, 0);           // FFT for spectrum 
 //---------------------------------------------------------------------------------------------------------
 
 //long vfofreq=3560000;
-long vfofreq=7056000;
+long vfofreq=7011000;
 //long vfofreq=7850000; // CHU
 //long vfofreq=14060000;  // frequency of the SI5351 VFO
 long cursorfreq;  // frequency of the on screen cursor which what we are listening to
 int cursor_pos=0;
-long encoder_pos=0, last_encoder_pos=999;
+long encoder_pos=0, last_encoder_pos=11000;
+//long encoder_pos=0, last_encoder_pos=999;
 elapsedMillis volmsec=0;
 
 void setup() 
@@ -278,12 +280,12 @@ void setup()
   //tft.setTextSize(2);
   // set up clk gen
 
- // si5351.init(SI5351_CRYSTAL_LOAD_8PF);
-  //si5351.init();
- // si5351.set_correction(-40);  // I did a by ear correction to CHU
+  si5351.init(SI5351_CRYSTAL_LOAD_8PF);
+ // si5351.init();
+  si5351.set_correction(-40);  // I did a by ear correction to CHU
   // Set CLK0 to output 14 MHz with a fixed PLL frequency
- // si5351.set_pll(SI5351_PLL_FIXED, SI5351_PLLA);
- // si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
+  si5351.set_pll(SI5351_PLL_FIXED, SI5351_PLLA);
+  si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
   delay(3);
 }
 
@@ -304,9 +306,9 @@ void loop()
     encoder_change=encoder_pos-last_encoder_pos;
     last_encoder_pos=encoder_pos;
     // press encoder button for fast tuning
-    if (digitalRead(TuneSW)) vfofreq+=encoder_change*5;  // tune the master vfo - 5hz steps
+    if (digitalRead(TuneSW)) vfofreq+=encoder_change*1;  // tune the master vfo - 5hz steps
     else vfofreq+=encoder_change*500;  // fast tuning 500hz steps
-//    si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
+    si5351.set_freq((unsigned long)vfofreq*4, SI5351_PLL_FIXED, SI5351_CLK0);
     tft.fillRect(100,115,100,120,ST7735_BLACK);
     tft.setCursor(100, 115);
     tft.setTextColor(ST7735_WHITE);
@@ -418,7 +420,7 @@ void loop()
 
        // Shut off TX path filters to save CPU
        
-        postFIR_bpf_2.end();
+        postFIR_bpf_1.end();
         postFIR_bpf_2.end();       
               
        // Setup RX path switches
