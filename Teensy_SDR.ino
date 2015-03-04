@@ -176,9 +176,9 @@ AudioConnection         c8(Summer2, 0, myFFT, 0);           // FFT for spectrum 
 //---------------------------------------------------------------------------------------------------------
 
 //long vfofreq=3560000;
-long vfofreq=7011000;
+//long vfofreq=7011000;
 //long vfofreq=7850000; // CHU
-//long vfofreq=14060000;  // frequency of the SI5351 VFO
+long vfofreq=14236000;  // frequency of the SI5351 VFO
 long cursorfreq;  // frequency of the on screen cursor which what we are listening to
 int cursor_pos=0;
 long encoder_pos=0, last_encoder_pos=11000;
@@ -268,7 +268,8 @@ void setup()
   // initialize the LCD display
 //  tft.init();
   tft.initR(INITR_BLACKTAB);   // initialize a S6D02A1S chip, black tab
-  tft.setRotation(1);
+//  tft.setRotation(1);  // Normal orientation
+  tft.setRotation(3);    // Inverted orientation
   tft.fillScreen(ST7735_BLACK);
   tft.setCursor(0, 115);
   tft.setTextColor(ST7735_WHITE);
@@ -283,9 +284,9 @@ void setup()
   //tft.setTextSize(2);
   // set up clk gen
 
-  si5351.init(SI5351_CRYSTAL_LOAD_8PF);  // used 25mhz xtal from old ethernet switch so load cap in question
+  si5351.init(SI5351_CRYSTAL_LOAD_8PF);  // used 25mhz xtal from old ethernet switch so load cap in question  
   si5351.set_correction(+2250);  // I used my freq counter so it's not right on, but close,
-  // Set CLK0 to output 14 MHz with a fixed PLL frequency
+  // Set CLK0 to output vfofreq * 4 with a fixed PLL frequency and multiplier if newer si5351 library
   si5351.set_pll(SI5351_PLL_FIXED, SI5351_PLLA);
   si5351.set_freq((unsigned long)vfofreq*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);
   delay(3);
@@ -308,7 +309,7 @@ void loop()
     encoder_change=encoder_pos-last_encoder_pos;
     last_encoder_pos=encoder_pos;
     // press encoder button for fast tuning
-    if (digitalRead(TuneSW)) vfofreq+=encoder_change*1;  // tune the master vfo - 5hz steps
+    if (digitalRead(TuneSW)) vfofreq+=encoder_change*5;  // tune the master vfo - 5hz steps
     else vfofreq+=encoder_change*500;  // fast tuning 500hz steps
     si5351.set_freq((unsigned long)vfofreq*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);
     tft.fillRect(100,115,100,120,ST7735_BLACK);
