@@ -362,10 +362,16 @@ void loop()
     if ((mode != oldmode)||(filter != oldfilter)||(tx != oldtx))
     {
       AudioNoInterrupts();   // Disable Audio while reconfiguring filters
-      tft.drawFastHLine(0,61, 160, ST7735_BLACK);   // Clear LCD BW indication
-      tft.drawFastHLine(0,62, 160, ST7735_BLACK);   // Clear LCD BW indication
+//      tft.drawFastHLine(0,61, 160, ST7735_BLACK);   // Clear LCD BW indication
+//      tft.drawFastHLine(0,62, 160, ST7735_BLACK);   // Clear LCD BW indication
+     
+      tft.drawFastHLine(0,62, 160, ST7735_YELLOW);   // Clear LCD BW indication
+
      if (tx)
      {
+       
+  tft.drawFastVLine(80, 0,60, ST7735_BLACK);       
+       
        // Setup TX path switches
        
         Summer2.gain(0,0);
@@ -424,7 +430,7 @@ void loop()
      }
      else   //RX
      {
-              
+        tft.drawFastVLine(80, 0,60, ST7735_BLUE);              
        // Setup RX path switches
        
         Summer2.gain(0,1);   // Select output of Summer1 to display Rx spectrum
