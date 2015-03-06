@@ -73,7 +73,7 @@ const int8_t TuneSW =6;    // low for fast tune - encoder pushbutton
 // unused pins 4,5, 10 (SDCS)
 
 int ncofreq  = 11000;       // IF Oscillator
-int test_freq = 700;         // test tone freq
+int test_freq = 2000;         // test tone freq
 
 // clock generator
 Si5351 si5351;
@@ -102,30 +102,28 @@ const int myTx = AUDIO_INPUT_MIC;
 const int myRx = AUDIO_INPUT_LINEIN;
 
 // FIR filters
-AudioInputI2S           i2s1;           // Audio Shield: mic or line-in
+AudioInputI2S           i2s1;           // Audio Shield: mic for TX, line-in for RX
 
 AudioFilterFIR          Hilbert45_I;    //Hilbert filter +45
 AudioFilterFIR          Hilbert45_Q;    //Hilbert filter -45
 
 AudioFilterFIR          FIR_BPF;        // 2.4 kHz USB or LSB filter centred at either 12.5 or 9.5 kHz
-AudioFilterFIR          postFIR_bpf_1;  // 4.8 kHz IF  filter centred at 11kHz
-AudioFilterFIR          postFIR_bpf_2;
+
 AudioFilterFIR          postFIR;        // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
 
 AudioSynthWaveform      test_tone;
 AudioAnalyzeFFT256      myFFT;          // Spectrum Display
 AudioSynthWaveform      sine1;          // Local Oscillator  
 AudioSynthWaveform      sine2;          // Local Oscillator 
+
 AudioEffectMultiply     multiply1;      // Mixer (multiply inputs)
-AudioEffectMultiply     multiply2;      // Mixer (multiply inputs)
-AudioEffectMultiply     multiply3;      // Mixer (multiply inputs)
 
 
-AudioOutputI2S          i2s2;        // Output the sum on both channels   
-AudioMixer4             Summer1;     // Summer (add inputs)
-AudioMixer4             Summer2;     // Summer (add inputs)
-AudioMixer4             Summer3;     // Summer (add inputs)
-AudioMixer4             Summer4;     // Summer (add inputs)
+AudioOutputI2S          i2s2;        // Output the sum on both channels for RX, I & Q for TX  
+AudioMixer4             Summer1;     // Summer (add I & Q inputs for Rx)
+AudioMixer4             Summer2;     // Summer (add for Tx displayinputs)
+AudioMixer4             Summer3;     // Summer (select inputs for Rx Tx CW)
+AudioMixer4             Summer4;     // Summer (select inputs for Rx Tx CW)
 
 //AudioAnalyzePeak        Smeter;        // Measure Audio Peak for S meter
 //AudioMixer4             AGC;           // Summer (add inputs)
@@ -134,27 +132,25 @@ AudioMixer4             Summer4;     // Summer (add inputs)
 AudioConnection         c1(i2s1, 0, Hilbert45_I, 0);
 AudioConnection         c2(i2s1, 1, Hilbert45_Q, 0);
 
+//AudioConnection         c1(test_tone, 0, Hilbert45_I, 0);
+//AudioConnection         c2(test_tone, 0, Hilbert45_Q, 0);
 
-AudioConnection         t1(Hilbert45_I, 0, multiply1, 0);
-AudioConnection         t2(Hilbert45_Q, 0, multiply2, 0);
 
 AudioConnection         r1(Hilbert45_I, 0, Summer1, 0);     // Sum the shifted filter outputs to supress the image
 AudioConnection         r2(Hilbert45_Q, 0, Summer1, 1);
 AudioConnection         r3(Summer1, 0, FIR_BPF, 0);         // 2.4 kHz USB or LSB filter centred at either 12.5 or 9.5 kHz
 
-AudioConnection         r3a3(Summer1, 0, Summer2, 0);         // RX FFT path
-AudioConnection         r4(FIR_BPF, 0, multiply3, 0);       // IF from BPF to Mixer
+AudioConnection         r3a(Summer1, 0, Summer2, 0);         // RX FFT path
+AudioConnection         r4(FIR_BPF, 0, multiply1, 0);       // IF from BPF to Mixer
 
-AudioConnection         r5(sine1, 0, multiply3, 1);         // Local Oscillator to Mixer (11 kHz)
-AudioConnection         r6(multiply3, 0, postFIR, 0);       // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
+AudioConnection         r5(sine1, 0, multiply1, 1);         // Local Oscillator to Mixer (11 kHz)
+AudioConnection         r6(multiply1, 0, postFIR, 0);       // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
 
-AudioConnection         c3(sine1, 0, multiply1, 1);         // Local Oscillator I to Mixer (11 kHz)
-AudioConnection         t5(sine2, 0, multiply2, 1);         // Local Oscillator Q to Mixer (11 kHz)
+AudioConnection         t8(Hilbert45_I, 0, Summer3, 1);
+AudioConnection         t9(Hilbert45_Q, 0, Summer4, 1);
 
-AudioConnection         t6(multiply1, postFIR_bpf_1);       // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
-AudioConnection         t7(multiply2, postFIR_bpf_2);       // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
-AudioConnection         t8(postFIR_bpf_1, 0, Summer3, 1);
-AudioConnection         t9(postFIR_bpf_2, 0, Summer4, 1);
+AudioConnection         t8a(Hilbert45_Q, 0, Summer3, 2);
+AudioConnection         t9a(Hilbert45_I, 0, Summer4, 2);
 
 AudioConnection         c4(Summer3, 0, i2s2, 1);
 AudioConnection         c5(Summer4, 0, i2s2, 0);
@@ -169,8 +165,8 @@ AudioConnection         r8(postFIR,0, Summer4, 0);
 
 AudioConnection         t10(Summer3, 0, Summer2, 1);        // TX FFT path
 AudioConnection         t11(Summer4, 0, Summer2, 2);        // TX FFT path
-AudioConnection         t12(sine1, 0, Summer3, 2);
-AudioConnection         t13(sine2, 0, Summer4, 2);
+AudioConnection         t12(sine1, 0, Summer3, 3);          // CW TC path 
+AudioConnection         t13(sine2, 0, Summer4, 3);          // CW TX path
 
 AudioConnection         c8(Summer2, 0, myFFT, 0);           // FFT for spectrum display
 //---------------------------------------------------------------------------------------------------------
@@ -181,6 +177,7 @@ AudioConnection         c8(Summer2, 0, myFFT, 0);           // FFT for spectrum 
 long vfofreq=14236000;  // frequency of the SI5351 VFO
 long cursorfreq;  // frequency of the on screen cursor which what we are listening to
 int cursor_pos=0;
+//long encoder_pos=0, last_encoder_pos=200;
 long encoder_pos=0, last_encoder_pos=11000;
 //long encoder_pos=0, last_encoder_pos=999;
 elapsedMillis volmsec=0;
@@ -233,9 +230,9 @@ void setup()
   // Stop the Audio stuff while manipulating parameters Initial setup for RX
   AudioNoInterrupts();
 
-//  test_tone.begin(1.0,2000,TONE_TYPE_SINE);
+  test_tone.begin(1.0,test_freq,TONE_TYPE_SINE);
   
-  //test_tone.amplitude(.008);
+  test_tone.amplitude(.4);
   
   // Local Oscillator at 11 kHz
   
@@ -254,11 +251,7 @@ void setup()
   // Initialize the Low Pass filter
   postFIR.begin(postfir_lpf,COEFF_LPF);
 
-
-  // Initialize the Post Band Pass filters  
-  //postFIR_bpf_1.begin(postfir_bpf,COEFF_POST_BPF);
-  //postFIR_bpf_2.begin(postfir_bpf,COEFF_POST_BPF);
-  
+ 
   // Start the Audio stuff
   AudioInterrupts(); 
 
@@ -376,19 +369,9 @@ void loop()
        // Setup TX path switches
        
         Summer2.gain(0,0);
-        Summer2.gain(1,1);
+        Summer2.gain(1,1);   // add inputs 1 & 2 for FFT display
         Summer2.gain(2,1);
         Summer2.gain(3,0);
-        
-        Summer3.gain(0,0);
-        Summer3.gain(1,1);
-        Summer3.gain(2,0);
-        Summer3.gain(3,0);
-        
-        Summer4.gain(0,0);
-        Summer4.gain(1,1);
-        Summer4.gain(2,0);
-        Summer4.gain(3,0);
 
        // Setup audio shield config for TX  
         
@@ -402,44 +385,59 @@ void loop()
         
         FIR_BPF.end();   // shut off RX path filters to save CPU
         postFIR.end();   // shut off RX path filters to save CPU
-        postFIR_bpf_1.begin(postfir_bpf,COEFF_POST_BPF);  // start up TX path I filter
-        postFIR_bpf_2.begin(postfir_bpf,COEFF_POST_BPF);  // Start up TX path Q filter
-        
+       
         // Setup USB/LSB generator
         
         if (mode)
         {
-          sine1.phase(0);
+          sine1.phase(0);      // CW only
           sine2.phase(90);
+                           
+          Summer3.gain(0,0);
+          Summer3.gain(1,1);  // Select TX path LSB
+          Summer3.gain(2,0);
+          Summer3.gain(3,0);
+        
+          Summer4.gain(0,0);
+          Summer4.gain(1,1);  //Select TX path LSB
+          Summer4.gain(2,0);
+          Summer4.gain(3,0);
+          
         }
         else
         {
-          sine1.phase(90);
+          sine1.phase(90);    // CW only
           sine2.phase(0);
+                           
+          Summer3.gain(0,0);
+          Summer3.gain(1,0);
+          Summer3.gain(2,1);  // Select TX path USB
+          Summer3.gain(3,0);
+        
+          Summer4.gain(0,0);
+          Summer4.gain(1,0);
+          Summer4.gain(2,1);  //Select TX path USB
+          Summer4.gain(3,0);
+
         }
        
      }
      else   //RX
      {
-
-       // Shut off TX path filters to save CPU
-       
-        postFIR_bpf_1.end();
-        postFIR_bpf_2.end();       
               
        // Setup RX path switches
        
-        Summer2.gain(0,1);
+        Summer2.gain(0,1);   // Select output of Summer1 to display Rx spectrum
         Summer2.gain(1,0);
         Summer2.gain(2,0);
         Summer2.gain(3,0);
         
-        Summer3.gain(0,1);
+        Summer3.gain(0,1);   // Select RX path
         Summer3.gain(1,0);
         Summer3.gain(2,0);
         Summer3.gain(3,0);
         
-        Summer4.gain(0,1);
+        Summer4.gain(0,1);   // Select RX Path
         Summer4.gain(1,0);
         Summer4.gain(2,0);
         Summer4.gain(3,0);
@@ -473,8 +471,8 @@ void loop()
           tft.drawFastHLine(61,62,20, ST7735_RED);
           tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
           tft.setCursor(100, 85);
-          sine1.phase(0);
-          sine2.phase(90);
+//          sine1.phase(0);
+//          sine2.phase(90);
           tft.print("LSB");
         }
       }
@@ -497,8 +495,8 @@ void loop()
           tft.drawFastHLine(80,62,20, ST7735_RED);
           tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
           tft.setCursor(100, 85);
-          sine1.phase(90);
-          sine2.phase(0);
+//          sine1.phase(90);
+//          sine2.phase(0);
           tft.print("USB");
         }
       }
