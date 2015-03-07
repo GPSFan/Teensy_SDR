@@ -297,6 +297,8 @@ void loop()
   static uint8_t w_index=0, w_avg;
 
 // tune radio using encoder switch  
+ if (!tx)  // unless in TX ie. don't change freq while transmitting
+{
   encoder_pos=tune.read();
   if (encoder_pos != last_encoder_pos) {
     encoder_change=encoder_pos-last_encoder_pos;
@@ -310,10 +312,15 @@ void loop()
     tft.setTextColor(ST7735_WHITE);
     cursorfreq=vfofreq+ncofreq; // frequency we are listening to
     sprintf(string,"%d.%03d.%03d",cursorfreq/1000000,(cursorfreq-cursorfreq/1000000*1000000)/1000,
-          cursorfreq%1000 );     
-          
+          cursorfreq%1000 );               
     tft.print(string); 
   }
+}
+else
+{
+  tune.write(last_encoder_pos);  // if TX, reset to last encoder pos
+}
+
 
   // every 50 ms, adjust the volume and check the switches
   if (volmsec > 50) {
@@ -370,7 +377,9 @@ void loop()
      if (tx)
      {
        
-  tft.drawFastVLine(80, 0,60, ST7735_BLACK);       
+       si5351.set_freq((unsigned long)(vfofreq+ncofreq)*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);  // adjust TX freq for nco offset
+       
+       tft.drawFastVLine(80, 0,60, ST7735_BLACK);       
        
        // Setup TX path switches
        
@@ -430,6 +439,9 @@ void loop()
      }
      else   //RX
      {
+       
+        si5351.set_freq((unsigned long)vfofreq*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);   // return to RX freq 
+       
         tft.drawFastVLine(80, 0,60, ST7735_BLUE);              
        // Setup RX path switches
        
