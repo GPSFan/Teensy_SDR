@@ -7,9 +7,11 @@ extern short hilbertm45[];
 extern short firbpf_usb[];
 extern short firbpf_lsb[];
 
-#define COEFF_LPF  54
-extern short postfir_700[];
+
 #define COEFF_700 120
+extern short postfir_700[];
+
+#define COEFF_LPF  66
 extern short postfir_lpf[];
 
 

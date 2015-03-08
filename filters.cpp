@@ -21,5 +21,5 @@ short postfir_700[COEFF_700] = {
 };
 
 short postfir_lpf[COEFF_LPF] = {
-#include "postfir_lpf.h" 
+#include "postfir_lpfx.h" 
 };
