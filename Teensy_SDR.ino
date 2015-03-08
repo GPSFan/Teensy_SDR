@@ -47,7 +47,7 @@
 // SW configuration defines
 // don't use more than one AGC!
 //#define SW_AGC   // define for Loftur's SW AGC - this has to be tuned carefully for your particular implementation
-#define HW_AGC // define for codec AGC - doesn't seem to work consistently. audio library bug ?
+//#define HW_AGC // define for codec AGC - doesn't seem to work consistently. audio library bug ?
 
 //#define CW_WATERFALL // define for experimental CW waterfall - needs faster update rate
 #define AUDIO_STATS    // shows audio library CPU utilization etc on serial console
@@ -91,81 +91,81 @@ Metro lcd_upd =Metro(100);  // Set up a Metro for LCD updates
 
 
 
-
 // Create the Audio components.  These should be created in the
 // order data flows, inputs/sources -> processing -> outputs
 //
 AudioControlSGTL5000 audioShield;  // Create an object to control the audio shield.
 
 //  RX & TX support
-const int myTx = AUDIO_INPUT_MIC;
-const int myRx = AUDIO_INPUT_LINEIN;
+const int myTx = AUDIO_INPUT_MIC;       // Transmit audio comes from mono Mic input
+const int myRx = AUDIO_INPUT_LINEIN;    // Receive I & Q audio comes from the stereo Line Input
 
 // FIR filters
-AudioInputI2S           i2s1;           // Audio Shield: mic for TX, line-in for RX
+AudioInputI2S           i2s1;           // Audio Shield: mic for TX, I & Q line-in for RX
 
-AudioFilterFIR          Hilbert45_I;    //Hilbert filter +45
-AudioFilterFIR          Hilbert45_Q;    //Hilbert filter -45
+//AudioSynthWaveform      test_tone;
+
+AudioFilterFIR          Hilbert45_I;    // Hilbert filter +45
+AudioFilterFIR          Hilbert45_Q;    // Hilbert filter -45
 
 AudioFilterFIR          FIR_BPF;        // 2.4 kHz USB or LSB filter centred at either 12.5 or 9.5 kHz
 
 AudioFilterFIR          postFIR;        // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
 
-AudioSynthWaveform      test_tone;
-AudioAnalyzeFFT256      myFFT;          // Spectrum Display
-AudioSynthWaveform      sine1;          // Local Oscillator  
-AudioSynthWaveform      sine2;          // Local Oscillator 
+AudioSynthWaveform      sine1;          // Local Oscillator RX & CW TX
+AudioSynthWaveform      sine2;          // Local Oscillator CW TX
 
 AudioEffectMultiply     multiply1;      // Mixer (multiply inputs)
 
+AudioMixer4             Summer1;        // Summer (add I & Q inputs for Rx)
+AudioMixer4             Summer2;        // Summer (add for Tx displayinputs)
+AudioMixer4             Summer3;        // Summer (select inputs for Rx Tx CW)
+AudioMixer4             Summer4;        // Summer (select inputs for Rx Tx CW)
 
-AudioOutputI2S          i2s2;        // Output the sum on both channels for RX, I & Q for TX  
-AudioMixer4             Summer1;     // Summer (add I & Q inputs for Rx)
-AudioMixer4             Summer2;     // Summer (add for Tx displayinputs)
-AudioMixer4             Summer3;     // Summer (select inputs for Rx Tx CW)
-AudioMixer4             Summer4;     // Summer (select inputs for Rx Tx CW)
+AudioAnalyzePeak        Smeter;         // Measure Audio Peak for S meter
+AudioAnalyzeFFT256      myFFT;          // Spectrum Display
+AudioAnalyzePeak        AGCpeak;        // Measure Audio Peak for AGC use
 
-//AudioAnalyzePeak        Smeter;        // Measure Audio Peak for S meter
-//AudioMixer4             AGC;           // Summer (add inputs)
-//AudioAnalyzePeak        AGCpeak;       // Measure Audio Peak for AGC use
+AudioOutputI2S          i2s2;           // Output the sum on both channels for RX to HP, I & Q for TX to Line Out 
 
-AudioConnection         c1(i2s1, 0, Hilbert45_I, 0);
-AudioConnection         c2(i2s1, 1, Hilbert45_Q, 0);
+// Create the Audio connections.
+
+AudioConnection         c1(i2s1, 0, Hilbert45_I, 0);   // Audio Shield ADC to Hilbert phase shifter. Mic for TX, I Line In for RX
+AudioConnection         c2(i2s1, 1, Hilbert45_Q, 0);   // Audio Shield ADC to Hilbert phase shifter. Mic for TX, Q Line In for RX
 
 //AudioConnection         c1(test_tone, 0, Hilbert45_I, 0);
 //AudioConnection         c2(test_tone, 0, Hilbert45_Q, 0);
 
-
-AudioConnection         r1(Hilbert45_I, 0, Summer1, 0);     // Sum the shifted filter outputs to supress the image
+AudioConnection         r1(Hilbert45_I, 0, Summer1, 0);     // Sum the Hilbert phase shifted filter outputs to supress the image
 AudioConnection         r2(Hilbert45_Q, 0, Summer1, 1);
 AudioConnection         r3(Summer1, 0, FIR_BPF, 0);         // 2.4 kHz USB or LSB filter centred at either 12.5 or 9.5 kHz
 
-AudioConnection         r3a(Summer1, 0, Summer2, 0);         // RX FFT path
+AudioConnection         r3a(Summer1, 0, Summer2, 0);        // RX FFT path
 AudioConnection         r4(FIR_BPF, 0, multiply1, 0);       // IF from BPF to Mixer
 
-AudioConnection         r5(sine1, 0, multiply1, 1);         // Local Oscillator to Mixer (11 kHz)
+AudioConnection         r5(sine1, 0, multiply1, 1);         // Local Oscillator (11 kHz) to Mixer
 AudioConnection         r6(multiply1, 0, postFIR, 0);       // 2700Hz Low Pass filter or 200 Hz wide CW filter at 700Hz on audio output
 
-AudioConnection         t8(Hilbert45_I, 0, Summer3, 1);
-AudioConnection         t9(Hilbert45_Q, 0, Summer4, 1);
+AudioConnection         t8(Hilbert45_I, 0, Summer3, 1);     // Phase shifted Mic audio LSB TX path I
+AudioConnection         t9(Hilbert45_Q, 0, Summer4, 1);     // Phase shifted Mic audio LSB TX path Q
 
-AudioConnection         t8a(Hilbert45_Q, 0, Summer3, 2);
-AudioConnection         t9a(Hilbert45_I, 0, Summer4, 2);
+AudioConnection         t8a(Hilbert45_Q, 0, Summer3, 2);    // Phase shifted Mic audio USB TX path I
+AudioConnection         t9a(Hilbert45_I, 0, Summer4, 2);    // Phase shifted Mic audio USB TX path Q
 
-AudioConnection         c4(Summer3, 0, i2s2, 1);
-AudioConnection         c5(Summer4, 0, i2s2, 0);
+AudioConnection         r7(postFIR,0, Summer3, 0);          // RX filtered Audio path
+AudioConnection         r8(postFIR,0, Summer4, 0);          // RX filtered audio path
 
-AudioConnection         r7(postFIR,0, Summer3, 0);
-AudioConnection         r8(postFIR,0, Summer4, 0);
+AudioConnection         c4(Summer3, 0, i2s2, 0);            // Phase shifted Mic audio TX I, Filtered RX audio
+AudioConnection         c5(Summer4, 0, i2s2, 1);            // Phase shifted Mic audio TX Q, Filtered RX audio
 
-//AudioConnection         r30(postFIR,0, Smeter, 0);        // S-Meter measure
-//AudioConnection         r31(postFIR,0, AGC, 0);           // AGC Gain loop adjust
-//AudioConnection         r40(AGC, 0, AGCpeak, 0);          // AGC Gain loop measure
-
+AudioConnection         r30(postFIR,0, Smeter, 0);          // S-Meter measure
+AudioConnection         r31(postFIR,0, Summer3, 0);         // AGC Gain loop adjust
+AudioConnection         r32(postFIR,0, Summer4, 0);         // AGC Gain loop adjust
+AudioConnection         r40(Summer3, 0, AGCpeak, 0);        // AGC Gain loop measure
 
 AudioConnection         t10(Summer3, 0, Summer2, 1);        // TX FFT path
 AudioConnection         t11(Summer4, 0, Summer2, 2);        // TX FFT path
-AudioConnection         t12(sine1, 0, Summer3, 3);          // CW TC path 
+AudioConnection         t12(sine1, 0, Summer3, 3);          // CW TX path 
 AudioConnection         t13(sine2, 0, Summer4, 3);          // CW TX path
 
 AudioConnection         c8(Summer2, 0, myFFT, 0);           // FFT for spectrum display
@@ -230,9 +230,9 @@ void setup()
   // Stop the Audio stuff while manipulating parameters Initial setup for RX
   AudioNoInterrupts();
 
-  test_tone.begin(1.0,test_freq,TONE_TYPE_SINE);
+//  test_tone.begin(1.0,test_freq,TONE_TYPE_SINE);
   
-  test_tone.amplitude(.4);
+//  test_tone.amplitude(.4);
   
   // Local Oscillator at 11 kHz
   
@@ -250,13 +250,20 @@ void setup()
   
   // Initialize the Low Pass filter
   postFIR.begin(postfir_lpf,COEFF_LPF);
+  
+    Summer1.gain(0,1);   // add inputs 1 & 2
+    Summer1.gain(1,1);   // add inputs 1 & 2
+    Summer1.gain(2,0);
+    Summer1.gain(3,0);
 
  
   // Start the Audio stuff
   AudioInterrupts(); 
 
-  SPI.setMOSI(7); // set up SPI for use with the audio card - alternate pins
-  SPI.setSCK(14);
+   // Is this really needed?
+
+//  SPI.setMOSI(7); // set up SPI for use with the audio card - alternate pins
+//  SPI.setSCK(14);
 
   // initialize the LCD display
 //  tft.init();
@@ -475,7 +482,7 @@ else
         FIR_BPF.begin(firbpf_lsb,BPF_COEFFS);       // 2.4kHz LSB filter       
         if (filter)
         {
-          postFIR.begin(postfir_700,COEFF_700);     // 500 Hz LSB filter
+          postFIR.begin(postfir_700,COEFF_700);     // 500 Hz filter
           tft.drawFastHLine(72,61,6, ST7735_RED);
           tft.drawFastHLine(72,62,6, ST7735_RED);
           tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
@@ -484,13 +491,11 @@ else
         }
         else
         {
-          postFIR.begin(postfir_lpf,COEFF_LPF);     // 2.4kHz LSB filter
+          postFIR.begin(postfir_lpf,COEFF_LPF);     // 2.4kHz filter
           tft.drawFastHLine(61,61,20, ST7735_RED);
           tft.drawFastHLine(61,62,20, ST7735_RED);
           tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
           tft.setCursor(100, 85);
-//          sine1.phase(0);
-//          sine2.phase(90);
           tft.print("LSB");
         }
       }
@@ -499,7 +504,7 @@ else
         FIR_BPF.begin(firbpf_usb,BPF_COEFFS);       // 2.4kHz USB filter
         if (filter)
         {
-          postFIR.begin(postfir_700,COEFF_700);     // 500 Hz LSB filter
+          postFIR.begin(postfir_700,COEFF_700);     // 500 Hz filter
           tft.drawFastHLine(83,61,6, ST7735_RED);
           tft.drawFastHLine(83,62,6, ST7735_RED);
           tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
@@ -508,13 +513,11 @@ else
         }
         else
         {
-          postFIR.begin(postfir_lpf,COEFF_LPF);     // 2.4kHz LSB filter
+          postFIR.begin(postfir_lpf,COEFF_LPF);     // 2.4kHz filter
           tft.drawFastHLine(80,61,20, ST7735_RED);
           tft.drawFastHLine(80,62,20, ST7735_RED);
           tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
           tft.setCursor(100, 85);
-//          sine1.phase(90);
-//          sine2.phase(0);
           tft.print("USB");
         }
       }
