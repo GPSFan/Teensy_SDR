@@ -65,15 +65,18 @@ const int8_t cs     = 2;
 const int8_t rst    = 1;
 
 // Switches between pin and ground for USB/LSB mode, wide and narrow filters
-const int8_t ModeSW =21;    // USB = low, LSB = high
-const int8_t FiltSW =20;    // 200 Hz CW filter = high
-const int8_t TxSW = 0;    // TX = low
-const int8_t TuneSW =6;    // low for fast tune - encoder pushbutton
+const int8_t ModeSW = 21;    // USB = low, LSB = high
+const int8_t FiltSW = 20;    // 200 Hz CW filter = high
+const int8_t TxSW = 0;      // TX = low
+const int8_t TuneSW = 6;     // low for fast tune - encoder pushbutton
+const int8_t CwSW = 12;      // CW mode, only matters in TX low = CW 
+const int8_t KeySW = 14;     // CW Key start tone low = tone on
 
-// unused pins 4,5, 10 (SDCS)
+// unused pins 7, 8, 10
 
 int ncofreq  = 11000;       // IF Oscillator
-int test_freq = 2000;         // test tone freq
+int test_freq = 2000;       // test tone freq
+int cw_tone = 700;          // CW tone
 
 // clock generator
 Si5351 si5351;
@@ -117,6 +120,9 @@ AudioSynthWaveform      sine2;          // Local Oscillator CW TX
 
 AudioEffectMultiply     multiply1;      // Mixer (multiply inputs)
 
+AudioEffectEnvelope      envelope1;      //
+AudioEffectEnvelope      envelope2;      //
+
 AudioMixer4             Summer1;        // Summer (add I & Q inputs for Rx)
 AudioMixer4             Summer2;        // Summer (add for Tx displayinputs)
 AudioMixer4             Summer3;        // Summer (select inputs for Rx Tx CW)
@@ -152,21 +158,23 @@ AudioConnection         t9(Hilbert45_Q, 0, Summer4, 1);     // Phase shifted Mic
 AudioConnection         t8a(Hilbert45_Q, 0, Summer3, 2);    // Phase shifted Mic audio USB TX path I
 AudioConnection         t9a(Hilbert45_I, 0, Summer4, 2);    // Phase shifted Mic audio USB TX path Q
 
-AudioConnection         r7(postFIR,0, Summer3, 0);          // RX filtered Audio path
-AudioConnection         r8(postFIR,0, Summer4, 0);          // RX filtered audio path
+AudioConnection         r7(postFIR, 0, Summer3, 0);          // RX filtered Audio path
+AudioConnection         r8(postFIR, 0, Summer4, 0);          // RX filtered audio path
 
 AudioConnection         c4(Summer3, 0, i2s2, 0);            // Phase shifted Mic audio TX I, Filtered RX audio
 AudioConnection         c5(Summer4, 0, i2s2, 1);            // Phase shifted Mic audio TX Q, Filtered RX audio
 
-AudioConnection         r30(postFIR,0, Smeter, 0);          // S-Meter measure
-AudioConnection         r31(postFIR,0, Summer3, 0);         // AGC Gain loop adjust
-AudioConnection         r32(postFIR,0, Summer4, 0);         // AGC Gain loop adjust
+AudioConnection         r30(postFIR, 0, Smeter, 0);          // S-Meter measure
+AudioConnection         r31(postFIR, 0, Summer3, 0);         // AGC Gain loop adjust
+AudioConnection         r32(postFIR, 0, Summer4, 0);         // AGC Gain loop adjust
 AudioConnection         r40(Summer3, 0, AGCpeak, 0);        // AGC Gain loop measure
 
 AudioConnection         t10(Summer3, 0, Summer2, 1);        // TX FFT path
 AudioConnection         t11(Summer4, 0, Summer2, 2);        // TX FFT path
-AudioConnection         t12(sine1, 0, Summer3, 3);          // CW TX path 
-AudioConnection         t13(sine2, 0, Summer4, 3);          // CW TX path
+AudioConnection         t12(sine1, 0, envelope1, 0);          // CW TX path 
+AudioConnection         t13(sine2, 0, envelope2, 0);          // CW TX path
+AudioConnection         t12a(envelope1, 0, Summer3, 3);          // CW TX path 
+AudioConnection         t13a(envelope2, 0, Summer4, 3);          // CW TX path
 
 AudioConnection         c8(Summer2, 0, myFFT, 0);           // FFT for spectrum display
 //---------------------------------------------------------------------------------------------------------
@@ -184,10 +192,12 @@ elapsedMillis volmsec=0;
 
 void setup() 
 {
-  pinMode(TxSW, INPUT_PULLUP); // Tx switch, low = Tx
+  pinMode(TxSW, INPUT_PULLUP);    // Tx switch, low = Tx
   pinMode(ModeSW, INPUT_PULLUP);  // USB = low, LSB = high
   pinMode(FiltSW, INPUT_PULLUP);  // 500Hz filter = high
   pinMode(TuneSW, INPUT_PULLUP);  // tuning rate = high
+  pinMode(CwSW, INPUT_PULLUP);  // CW mode = low
+  pinMode(KeySW, INPUT_PULLUP);   // Key = tone on = low
   
   // Audio connections require memory to work.  For more
   // detailed information, see the MemoryAndCpuUsage example
@@ -256,11 +266,26 @@ void setup()
     Summer1.gain(2,0);
     Summer1.gain(3,0);
 
+  // Initialize envelope parameters
+  
+   envelope1.delay(0);
+   envelope1.attack(10);
+   envelope1.hold(0);
+   envelope1.decay(10);
+   envelope1.sustain(1.0);
+   envelope1.release(10);
+   
+   envelope2.delay(0);
+   envelope2.attack(10);
+   envelope2.hold(0);
+   envelope2.decay(10);
+   envelope2.sustain(1.0);
+   envelope2.release(10);
  
   // Start the Audio stuff
   AudioInterrupts(); 
 
-   // Is this really needed?
+   // Is this really needed? nope...
 
 //  SPI.setMOSI(7); // set up SPI for use with the audio card - alternate pins
 //  SPI.setSCK(14);
@@ -268,8 +293,8 @@ void setup()
   // initialize the LCD display
 //  tft.init();
   tft.initR(INITR_BLACKTAB);   // initialize a S6D02A1S chip, black tab
-//  tft.setRotation(1);  // Normal orientation
-  tft.setRotation(3);    // Inverted orientation
+//  tft.setRotation(1);         // Normal orientation
+  tft.setRotation(3);         // Inverted orientation for my mounting
   tft.fillScreen(ST7735_BLACK);
   tft.setCursor(0, 115);
   tft.setTextColor(ST7735_WHITE);
@@ -282,27 +307,42 @@ void setup()
   // Set LCD defaults
   tft.setTextColor(ST7735_YELLOW);
   //tft.setTextSize(2);
-  // set up clk gen
+  
+  
+  // Set up si5351 clk genenerator
 
-  si5351.init(SI5351_CRYSTAL_LOAD_8PF);  // used 25mhz xtal from old ethernet switch so load cap in question  
-  si5351.set_correction(+2250);  // I used my freq counter so it's not right on, but close,
+  si5351.init(SI5351_CRYSTAL_LOAD_8PF);  // I used a 25mhz xtal from old ethernet switch so load cap in question  
+  si5351.set_correction(+2250);          // I used my freq counter so it's not right on, but close,
   // Set CLK0 to output vfofreq * 4 with a fixed PLL frequency and multiplier if newer si5351 library
   si5351.set_pll(SI5351_PLL_FIXED, SI5351_PLLA);
   si5351.set_freq((unsigned long)vfofreq*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);
-  delay(3);
+  delay(3);                             // wait for si5351 to settle
 }
 
 
 void loop() 
 {
-  static uint8_t mode, filter, modesw_state, filtersw_state, tx, txsw_state;
+  static uint8_t mode, filter, modesw_state, filtersw_state, tx, txsw_state, cw, cwsw_state, key;
   // Force a first time USB/LSB Mode and filter update
-  static uint8_t oldmode=0xff, oldfilter=0xff, oldtx=0xff;
+  static uint8_t oldmode=0xff, oldfilter=0xff, oldtx=0xff, oldcw=0xff;
   long encoder_change;
   char string[80];   // print format stuff
   static uint8_t waterfall[80];  // array for simple waterfall display
   static uint8_t w_index=0, w_avg;
 
+// Check for key
+
+if (!digitalRead(KeySW) && cw && tx)
+{
+  envelope1.noteOn();
+  envelope2.noteOn();
+}
+else
+{
+  envelope1.noteOff();
+  envelope2.noteOff();
+}
+  
 // tune radio using encoder switch  
  if (!tx)  // unless in TX ie. don't change freq while transmitting
 {
@@ -373,7 +413,9 @@ else
 //    mode   = !digitalRead(ModeSW);
 //    filter = !digitalRead(FiltSW);
     tx     = !digitalRead(TxSW);
-    if ((mode != oldmode)||(filter != oldfilter)||(tx != oldtx))
+    cw     = !digitalRead(CwSW);
+
+    if ((mode != oldmode)||(filter != oldfilter)||(tx != oldtx)||(cw != oldcw))
     {
       AudioNoInterrupts();   // Disable Audio while reconfiguring filters
 //      tft.drawFastHLine(0,61, 160, ST7735_BLACK);   // Clear LCD BW indication
@@ -408,13 +450,42 @@ else
         FIR_BPF.end();   // shut off RX path filters to save CPU
         postFIR.end();   // shut off RX path filters to save CPU
        
-        // Setup USB/LSB generator
+        // Setup USB/LSB/CW generator
         
+
+     if (cw)
+     {
+          sine1.begin(1.0,ncofreq + cw_tone,TONE_TYPE_SINE);
+          sine2.begin(1.0,ncofreq + cw_tone,TONE_TYPE_SINE);
+          Summer3.gain(0,0);
+          Summer3.gain(1,0);
+          Summer3.gain(2,0);
+          Summer3.gain(3,1);
+          
+          Summer4.gain(0,0);
+          Summer4.gain(1,0); 
+          Summer4.gain(2,0);
+          Summer4.gain(3,1);         
+          
         if (mode)
         {
-          sine1.phase(0);      // CW only
-          sine2.phase(90);
-                           
+          sine1.phase(0);  // Select phase for CW LSB 
+          sine2.phase(90);                                   
+        }
+        else
+        {
+          sine1.phase(90);  // Select phase for CW USB 
+          sine2.phase(0);                           
+        }
+     }
+    else
+   {
+         sine1.begin(1.0,ncofreq,TONE_TYPE_SINE);
+         sine2.begin(1.0,ncofreq,TONE_TYPE_SINE);
+        
+         
+        if (mode)
+        {                           
           Summer3.gain(0,0);
           Summer3.gain(1,1);  // Select TX path LSB
           Summer3.gain(2,0);
@@ -428,9 +499,6 @@ else
         }
         else
         {
-          sine1.phase(90);    // CW only
-          sine2.phase(0);
-                           
           Summer3.gain(0,0);
           Summer3.gain(1,0);
           Summer3.gain(2,1);  // Select TX path USB
@@ -440,14 +508,16 @@ else
           Summer4.gain(1,0);
           Summer4.gain(2,1);  //Select TX path USB
           Summer4.gain(3,0);
-
-        }
-       
+        }  
+   } 
      }
      else   //RX
      {
        
         si5351.set_freq((unsigned long)vfofreq*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);   // return to RX freq 
+        sine1.begin(1.0,ncofreq,TONE_TYPE_SINE);                                                     // return NCO to 11KHz
+
+       
        
         tft.drawFastVLine(80, 0,60, ST7735_BLUE);              
        // Setup RX path switches
@@ -527,6 +597,7 @@ else
       oldmode = mode;
       oldfilter = filter;
       oldtx = tx;
+      oldcw = cw;
     
     } 
   }
