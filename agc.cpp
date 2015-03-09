@@ -13,7 +13,9 @@
 extern Adafruit_ST7735 tft;
 //extern Adafruit_S6D02A1 tft;
 
-extern AudioMixer4            AGC;      // Summer (add inputs)
+//extern AudioMixer4            AGC;      // Summer (add inputs)
+extern AudioMixer4            Summer3;      // Summer (add inputs)
+extern AudioMixer4            Summer4;      // Summer (add inputs)
 extern AudioAnalyzePeak       AGCpeak;  // Measure Audio Peak for AGC use
 extern AudioAnalyzePeak       Smeter;   // Measure Audio Peak for S meter
 
@@ -89,8 +91,9 @@ void agc(void)
     
     if (AGCgain > AGCMAX) AGCgain=AGCMAX; // limit the gain  
     
-    AGC.gain(0,AGCgain);       // Adjust AGC gain
-    
+//    AGC.gain(0,AGCgain);       // Adjust AGC gain
+    Summer3.gain(0,AGCgain);       // Adjust AGC gain
+    Summer4.gain(0,AGCgain);       // Adjust AGC gain    
     //
     // Print stuff to LCD only once every 100ms
     //
