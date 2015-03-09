@@ -20,15 +20,16 @@ Driver for your display (I used a Banggood knockoff of the AdaFruit 1.8" TFT)
 
 Mods by GPSFan   Ken McGuire  WA2VFN  2/28/2015
 
-- update code for compatibility with Teensyduino 1.2 and audio library 1.02 ... working
+- update code for compatibility with Teensyduino 1.2 and audio library 1.02 ... working with 1.2beta7
 - SSB transmit mode ... appears to be working
 - TX - RX  switching ... appears to be working
+- CW transmit mode ... appears to be working
+- internal keyer
 
 Still TODO:
 
-- CW transmit mode ... implememted, needs more work
+- interconnection diagram
 - band switching
-- internal keyer
 - UI improvements - configuration settings etc
 
 project blog: rheslip.blogspot.com
