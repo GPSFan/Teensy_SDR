@@ -3,6 +3,7 @@
  * audio processing is done by the Teensy 3.1
  * simple UI runs on a 160x120 color TFT display - AdaFruit or Banggood knockoff which has a different LCD controller
  * Copyright (C) 2014  Rich Heslip rheslip@hotmail.com
+ * Copyright (C) 2015  Ken McGuire
  * History:
  * 4/14 initial version by R Heslip VE3MKC
  * 6/14 Loftur E. Jónasson TF3LJ/VE2LJX - filter improvements, inclusion of Metro, software AGC module, optimized audio processing, UI changes
@@ -10,9 +11,12 @@
  *    - added HW AGC option which uses codec AGC module
  *    - added experimental waterfall display for CW
  * 2/28 KM adapt to latest Audio Library, Arduino 1.6 and 1.21 of Teensyduino
+ * 3/9 KM SSB & CW TX mods, CW keyer with envelope waveshaping
  * ToDo:
- * implement transmit mode: should be able to do this by switching hilbert filters down to 300-2.7khz and adding a mixer route to line out.
- * clean up some of the hard coded HW and UI stuff 
+ * adjust audio levels & gains for proper drive levels to RXTX
+ * work on AGC
+ * clean up some of the hard coded HW and UI stuff
+ * document Teensy-audio-RXTX interconnections
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,7 +37,7 @@
 #include <Wire.h>
 #include <SD.h>
 #include <Encoder.h>
-#include "si5351.h"  // don't use jason branch 3/1/2015
+#include "si5351.h"  // don't use jason branch 3/1/2015, it doesn't work yet
 //#include <si5351.h>
 #include <Bounce.h>
 #include <Adafruit_GFX.h>   // LCD Core graphics library
@@ -52,7 +56,7 @@
 //#define CW_WATERFALL // define for experimental CW waterfall - needs faster update rate
 #define AUDIO_STATS    // shows audio library CPU utilization etc on serial console
 
-//#define SI5351_FREQ_MULT	100ULL
+//#define SI5351_FREQ_MULT	100ULL  // when jason branch works this (and other stuff) will be needed
 #define SI5351_FREQ_MULT	1ULL   // jason branch uses .01 hz steps, but tuning doesn't work, so this is 1 for now.
 
 extern void agc(void);      // Moved the AGC function to a separate location
@@ -64,19 +68,19 @@ const int8_t dc     = 3;
 const int8_t cs     = 2;
 const int8_t rst    = 1;
 
-// Switches between pin and ground for USB/LSB mode, wide and narrow filters
+// Switches between pin and ground for USB/LSB mode, wide and narrow filters, TX, CW and Key.
 const int8_t ModeSW = 21;    // USB = low, LSB = high
 const int8_t FiltSW = 20;    // 200 Hz CW filter = high
-const int8_t TxSW = 0;      // TX = low
+const int8_t TxSW = 0;       // TX = low
 const int8_t TuneSW = 6;     // low for fast tune - encoder pushbutton
 const int8_t CwSW = 12;      // CW mode, only matters in TX low = CW 
-const int8_t KeySW = 14;     // CW Key start tone low = tone on
+const int8_t KeySW = 10;     // CW Key start tone low = tone on
 
-// unused pins 7, 8, 10
+// unused pins 7, 8, 14
 
-int ncofreq  = 11000;       // IF Oscillator
-int test_freq = 2000;       // test tone freq
-int cw_tone = 700;          // CW tone
+int ncofreq  = 11000;        // IF Oscillator
+int test_freq = 2000;        // test tone freq
+int cw_tone = 700;           // CW tone
 
 // clock generator
 Si5351 si5351;
@@ -91,7 +95,6 @@ Adafruit_ST7735 tft = Adafruit_ST7735(cs, dc, mosi, sclk, rst);
 Metro five_sec=Metro(5000); // Set up a 5 second Metro
 Metro loo_ms = Metro(100);  // Set up a 100ms Metro
 Metro lcd_upd =Metro(100);  // Set up a Metro for LCD updates
-
 
 
 // Create the Audio components.  These should be created in the
@@ -117,11 +120,12 @@ AudioFilterFIR          postFIR;        // 2700Hz Low Pass filter or 200 Hz wide
 
 AudioSynthWaveform      sine1;          // Local Oscillator RX & CW TX
 AudioSynthWaveform      sine2;          // Local Oscillator CW TX
+AudioSynthWaveform      sine3;          // Local Oscillator CW TX
 
 AudioEffectMultiply     multiply1;      // Mixer (multiply inputs)
 
-AudioEffectEnvelope      envelope1;      //
-AudioEffectEnvelope      envelope2;      //
+AudioEffectEnvelope     envelope1;      // Keyer attack & decay tries to eliminate "Key Clicks"
+AudioEffectEnvelope     envelope2;      //
 
 AudioMixer4             Summer1;        // Summer (add I & Q inputs for Rx)
 AudioMixer4             Summer2;        // Summer (add for Tx displayinputs)
@@ -158,25 +162,24 @@ AudioConnection         t9(Hilbert45_Q, 0, Summer4, 1);     // Phase shifted Mic
 AudioConnection         t8a(Hilbert45_Q, 0, Summer3, 2);    // Phase shifted Mic audio USB TX path I
 AudioConnection         t9a(Hilbert45_I, 0, Summer4, 2);    // Phase shifted Mic audio USB TX path Q
 
-AudioConnection         r7(postFIR, 0, Summer3, 0);          // RX filtered Audio path
-AudioConnection         r8(postFIR, 0, Summer4, 0);          // RX filtered audio path
+AudioConnection         r7(postFIR, 0, Summer3, 0);         // RX filtered Audio path
+AudioConnection         r8(postFIR, 0, Summer4, 0);         // RX filtered audio path
 
 AudioConnection         c4(Summer3, 0, i2s2, 0);            // Phase shifted Mic audio TX I, Filtered RX audio
 AudioConnection         c5(Summer4, 0, i2s2, 1);            // Phase shifted Mic audio TX Q, Filtered RX audio
 
-AudioConnection         r30(postFIR, 0, Smeter, 0);          // S-Meter measure
-AudioConnection         r31(postFIR, 0, Summer3, 0);         // AGC Gain loop adjust
-AudioConnection         r32(postFIR, 0, Summer4, 0);         // AGC Gain loop adjust
+AudioConnection         r30(postFIR, 0, Smeter, 0);         // S-Meter measure
 AudioConnection         r40(Summer3, 0, AGCpeak, 0);        // AGC Gain loop measure
 
 AudioConnection         t10(Summer3, 0, Summer2, 1);        // TX FFT path
 AudioConnection         t11(Summer4, 0, Summer2, 2);        // TX FFT path
-AudioConnection         t12(sine1, 0, envelope1, 0);          // CW TX path 
-AudioConnection         t13(sine2, 0, envelope2, 0);          // CW TX path
-AudioConnection         t12a(envelope1, 0, Summer3, 3);          // CW TX path 
-AudioConnection         t13a(envelope2, 0, Summer4, 3);          // CW TX path
+AudioConnection         t12(sine1, 0, envelope1, 0);        // CW TX path 
+AudioConnection         t13(sine2, 0, envelope2, 0);        // CW TX path
+AudioConnection         t12a(envelope1, 0, Summer3, 3);     // CW TX path 
+AudioConnection         t13a(envelope2, 0, Summer4, 3);     // CW TX path
 
 AudioConnection         c8(Summer2, 0, myFFT, 0);           // FFT for spectrum display
+
 //---------------------------------------------------------------------------------------------------------
 
 //long vfofreq=3560000;
@@ -196,18 +199,19 @@ void setup()
   pinMode(ModeSW, INPUT_PULLUP);  // USB = low, LSB = high
   pinMode(FiltSW, INPUT_PULLUP);  // 500Hz filter = high
   pinMode(TuneSW, INPUT_PULLUP);  // tuning rate = high
-  pinMode(CwSW, INPUT_PULLUP);  // CW mode = low
+  pinMode(CwSW, INPUT_PULLUP);    // CW mode = low
   pinMode(KeySW, INPUT_PULLUP);   // Key = tone on = low
   
   // Audio connections require memory to work.  For more
   // detailed information, see the MemoryAndCpuUsage example
-  AudioMemory(20);  //was 12
+  AudioMemory(20);  //was 12 could maybe be smaller
 
   // Enable the audio shield and set the output volume.
   audioShield.enable();
   audioShield.inputSelect(myRx);
-  audioShield.volume(127);
-  audioShield.unmuteLineout();
+//  audioShield.volume(127);                 // funny this is said to be 0-1.0 in the audio shield docs
+  audioShield.volume(.5);
+  audioShield.muteLineout();
   audioShield.micGain(0);
   
 #ifdef HW_AGC
@@ -240,17 +244,14 @@ void setup()
   // Stop the Audio stuff while manipulating parameters Initial setup for RX
   AudioNoInterrupts();
 
-//  test_tone.begin(1.0,test_freq,TONE_TYPE_SINE);
-  
+//  test_tone.begin(1.0,test_freq,TONE_TYPE_SINE);  
 //  test_tone.amplitude(.4);
   
-  // Local Oscillator at 11 kHz
+  // Local Oscillator at 11 KHz, or 11KHz+/- 700Hz for CW TX
   
   sine1.begin(1.0,ncofreq,TONE_TYPE_SINE);
-  sine2.begin(1.0,ncofreq,TONE_TYPE_SINE);
-  
-  sine1.phase(90);
-  
+  sine2.begin(1.0,ncofreq,TONE_TYPE_SINE);  
+ 
   // Initialize the +/-45 degree Hilbert filters
   Hilbert45_I.begin(hilbert45,HILBERT_COEFFS);
   Hilbert45_Q.begin(hilbertm45,HILBERT_COEFFS);
@@ -261,26 +262,26 @@ void setup()
   // Initialize the Low Pass filter
   postFIR.begin(postfir_lpf,COEFF_LPF);
   
-    Summer1.gain(0,1);   // add inputs 1 & 2
-    Summer1.gain(1,1);   // add inputs 1 & 2
-    Summer1.gain(2,0);
-    Summer1.gain(3,0);
+  Summer1.gain(0,1);   // add inputs 1 & 2
+  Summer1.gain(1,1);   // add inputs 1 & 2
+  Summer1.gain(2,0);
+  Summer1.gain(3,0);
 
   // Initialize envelope parameters
   
-   envelope1.delay(0);
-   envelope1.attack(10);
-   envelope1.hold(0);
-   envelope1.decay(10);
-   envelope1.sustain(1.0);
-   envelope1.release(10);
+  envelope1.delay(0);
+  envelope1.attack(10);
+  envelope1.hold(0);
+  envelope1.decay(10);
+  envelope1.sustain(1.0);
+  envelope1.release(10);
    
-   envelope2.delay(0);
-   envelope2.attack(10);
-   envelope2.hold(0);
-   envelope2.decay(10);
-   envelope2.sustain(1.0);
-   envelope2.release(10);
+  envelope2.delay(0);
+  envelope2.attack(10);
+  envelope2.hold(0);
+  envelope2.decay(10);
+  envelope2.sustain(1.0);
+  envelope2.release(10);
  
   // Start the Audio stuff
   AudioInterrupts(); 
@@ -322,26 +323,13 @@ void setup()
 
 void loop() 
 {
-  static uint8_t mode, filter, modesw_state, filtersw_state, tx, txsw_state, cw, cwsw_state, key;
+  static uint8_t mode, filter, modesw_state, filtersw_state, tx, txsw_state, cw, cwsw_state, key, keysw_state;
   // Force a first time USB/LSB Mode and filter update
-  static uint8_t oldmode=0xff, oldfilter=0xff, oldtx=0xff, oldcw=0xff;
+  static uint8_t oldmode=0xff, oldfilter=0xff, oldtx=0xff, oldcw=0xff,  oldkey=0xff;
   long encoder_change;
   char string[80];   // print format stuff
   static uint8_t waterfall[80];  // array for simple waterfall display
   static uint8_t w_index=0, w_avg;
-
-// Check for key
-
-if (!digitalRead(KeySW) && cw && tx)
-{
-  envelope1.noteOn();
-  envelope2.noteOn();
-}
-else
-{
-  envelope1.noteOff();
-  envelope2.noteOff();
-}
   
 // tune radio using encoder switch  
  if (!tx)  // unless in TX ie. don't change freq while transmitting
@@ -398,23 +386,60 @@ else
          txsw_state=1; // flag switch is pressed
        }
     }
-    else txsw_state=0; // flag switch not pressed 
+    else txsw_state=0; // flag switch not pressed
+   
+     if (!digitalRead(CwSW)) {
+       if (cwsw_state==0) { // switch was pressed - falling edge
+         cw=!cw; 
+         cwsw_state=1; // flag switch is pressed
+       }
+    }
+    else cwsw_state=0; // flag switch not pressed       
+    
   }
 
 #ifdef SW_AGC
   agc();  // Automatic Gain Control function
 #endif  
 
+// Check for key
+    key    = !digitalRead(KeySW);
+         if (!key)     // if the key is down      
+         {
+          if (keysw_state==0)   // and if the state is 0
+           { // switch was pressed - falling edge
+             key=!key;         
+             keysw_state=1; // flag switch as pressed ie key down
+           }
+         }
+         else keysw_state=0; // flag switch not pressed ie key up
+    
+    if (key != oldkey)       // if old and new are different
+   {
+       if (keysw_state == 0)  
+      {
+         envelope1.noteOn();
+         envelope2.noteOn();
+      }
+      else
+      {
+         envelope1.noteOff();
+         envelope2.noteOff();
+      }
+      oldkey = key;
+   }
+    
   //
   // Select RX/TX, USB/LSB mode and a corresponding 2.4kHz or 500Hz filter
   //
-  if (loo_ms.check() == 1)
+  
+  if (loo_ms.check() == 1)  // this happens every 100ms
   {
 //    mode   = !digitalRead(ModeSW);
 //    filter = !digitalRead(FiltSW);
     tx     = !digitalRead(TxSW);
     cw     = !digitalRead(CwSW);
-
+    
     if ((mode != oldmode)||(filter != oldfilter)||(tx != oldtx)||(cw != oldcw))
     {
       AudioNoInterrupts();   // Disable Audio while reconfiguring filters
@@ -424,23 +449,22 @@ else
       tft.drawFastHLine(0,62, 160, ST7735_YELLOW);   // Clear LCD BW indication
 
      if (tx)
-     {
-       
-       si5351.set_freq((unsigned long)(vfofreq+ncofreq)*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);  // adjust TX freq for nco offset
+     {       
        
        tft.drawFastVLine(80, 0,60, ST7735_BLACK);       
        
        // Setup TX path switches
        
         Summer2.gain(0,0);
-        Summer2.gain(1,1);   // add inputs 1 & 2 for FFT display
-        Summer2.gain(2,1);
+        Summer2.gain(1,.5);   // add inputs 1 & 2 for FFT display
+        Summer2.gain(2,.5);
         Summer2.gain(3,0);
 
        // Setup audio shield config for TX  
         
         audioShield.inputSelect(myTx);
-        audioShield.volume(127);
+//        audioShield.volume(127);                 // funny this is said to be 0-1.0 in the audio shield docs
+        audioShield.volume(.5);
         audioShield.unmuteLineout();
         audioShield.muteHeadphone();
         audioShield.micGain(0);
@@ -455,35 +479,36 @@ else
 
      if (cw)
      {
-          sine1.begin(1.0,ncofreq + cw_tone,TONE_TYPE_SINE);
-          sine2.begin(1.0,ncofreq + cw_tone,TONE_TYPE_SINE);
           Summer3.gain(0,0);
           Summer3.gain(1,0);
           Summer3.gain(2,0);
           Summer3.gain(3,1);
-          
+
           Summer4.gain(0,0);
           Summer4.gain(1,0); 
           Summer4.gain(2,0);
           Summer4.gain(3,1);         
           
-        if (mode)
+        if (mode)  // LSB = 1
         {
-          sine1.phase(0);  // Select phase for CW LSB 
-          sine2.phase(90);                                   
+          sine1.begin(0.05,ncofreq - cw_tone,TONE_TYPE_SINE); // CW LSB
+          sine2.begin(0.05,ncofreq - cw_tone,TONE_TYPE_SINE); // CW LSB         
         }
         else
         {
-          sine1.phase(90);  // Select phase for CW USB 
-          sine2.phase(0);                           
+          sine1.begin(0.05,ncofreq + cw_tone,TONE_TYPE_SINE); //CW USB
+          sine2.begin(0.05,ncofreq + cw_tone,TONE_TYPE_SINE); //CW USB          
         }
+         sine1.phase(90);
+         sine2.phase(0);
      }
-    else
-   {
-         sine1.begin(1.0,ncofreq,TONE_TYPE_SINE);
-         sine2.begin(1.0,ncofreq,TONE_TYPE_SINE);
+     else
+      {
+          sine1.begin(1.0,ncofreq,TONE_TYPE_SINE);
+          sine2.begin(1.0,ncofreq,TONE_TYPE_SINE);
         
-         
+          si5351.set_freq((unsigned long)(vfofreq+ncofreq)*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);  // adjust TX freq for nco offset
+        
         if (mode)
         {                           
           Summer3.gain(0,0);
@@ -509,15 +534,15 @@ else
           Summer4.gain(2,1);  //Select TX path USB
           Summer4.gain(3,0);
         }  
-   } 
+      } 
      }
      else   //RX
      {
        
         si5351.set_freq((unsigned long)vfofreq*4*SI5351_FREQ_MULT, SI5351_PLL_FIXED, SI5351_CLK0);   // return to RX freq 
         sine1.begin(1.0,ncofreq,TONE_TYPE_SINE);                                                     // return NCO to 11KHz
-
-       
+        sine2.begin(1.0,ncofreq,TONE_TYPE_SINE);
+      
        
         tft.drawFastVLine(80, 0,60, ST7735_BLUE);              
        // Setup RX path switches
@@ -540,7 +565,8 @@ else
        // Setup audio shield config for RX
        
         audioShield.inputSelect(myRx);
-        audioShield.volume(127);
+//        audioShield.volume(127);                 // funny this is said to be 0-1.0 in the audio shield docs
+        audioShield.volume(.5);
         audioShield.muteLineout();
         audioShield.unmuteHeadphone();
         audioShield.lineInLevel(10);
