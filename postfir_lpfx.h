@@ -89,5 +89,5 @@ static int filter_taps[FILTER_TAP_NUM] = {
   77,
   91,
   155
-};
+
 
