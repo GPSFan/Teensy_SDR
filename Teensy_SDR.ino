@@ -464,7 +464,7 @@ else
         
         audioShield.inputSelect(myTx);
 //        audioShield.volume(127);                 // funny this is said to be 0-1.0 in the audio shield docs
-        audioShield.volume(.5);
+//        audioShield.volume(.5);
         audioShield.unmuteLineout();
         audioShield.muteHeadphone();
         audioShield.micGain(0);
@@ -476,9 +476,14 @@ else
        
         // Setup USB/LSB/CW generator
         
+        tft.fillRect(60, 85, 30, 7,ST7735_BLACK);// (x, y, w, h, color)
 
      if (cw)
      {
+       
+          tft.setCursor(60, 85); // (x, y)
+          tft.print("CW TX");         
+          
           Summer3.gain(0,0);
           Summer3.gain(1,0);
           Summer3.gain(2,0);
@@ -491,13 +496,17 @@ else
           
         if (mode)  // LSB = 1
         {
-          sine1.begin(0.05,ncofreq - cw_tone,TONE_TYPE_SINE); // CW LSB
-          sine2.begin(0.05,ncofreq - cw_tone,TONE_TYPE_SINE); // CW LSB         
+          
+          // Set the following levels so that your Transciever doesn't cause distortion .68 produces about .8v p-p 
+          // This is for CW only and has no bearing on ssb mode.
+          
+          sine1.begin(.68,ncofreq - cw_tone,TONE_TYPE_SINE); // CW LSB
+          sine2.begin(.68,ncofreq - cw_tone,TONE_TYPE_SINE); // CW LSB         
         }
         else
         {
-          sine1.begin(0.05,ncofreq + cw_tone,TONE_TYPE_SINE); //CW USB
-          sine2.begin(0.05,ncofreq + cw_tone,TONE_TYPE_SINE); //CW USB          
+          sine1.begin(0.68,ncofreq + cw_tone,TONE_TYPE_SINE); //CW USB
+          sine2.begin(0.68,ncofreq + cw_tone,TONE_TYPE_SINE); //CW USB          
         }
          sine1.phase(90);
          sine2.phase(0);
@@ -543,7 +552,7 @@ else
         sine1.begin(1.0,ncofreq,TONE_TYPE_SINE);                                                     // return NCO to 11KHz
         sine2.begin(1.0,ncofreq,TONE_TYPE_SINE);
       
-       
+        tft.fillRect(60, 85, 30, 7,ST7735_BLACK);// (x, y, w, h, color)
         tft.drawFastVLine(80, 0,60, ST7735_BLUE);              
        // Setup RX path switches
        
@@ -566,7 +575,7 @@ else
        
         audioShield.inputSelect(myRx);
 //        audioShield.volume(127);                 // funny this is said to be 0-1.0 in the audio shield docs
-        audioShield.volume(.5);
+//        audioShield.volume(.5);
         audioShield.muteLineout();
         audioShield.unmuteHeadphone();
         audioShield.lineInLevel(10);
@@ -579,9 +588,9 @@ else
         if (filter)
         {
           postFIR.begin(postfir_700,COEFF_700);     // 500 Hz filter
-          tft.drawFastHLine(72,61,6, ST7735_RED);
+          tft.drawFastHLine(72,61,6, ST7735_RED);   // (x, y, w, color)
           tft.drawFastHLine(72,62,6, ST7735_RED);
-          tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode
+          tft.fillRect(100, 85, 60, 7,ST7735_BLACK);// Print Mode (x, y, w, h, color)
           tft.setCursor(100, 85);
           tft.print("LSB narrow");
         }
@@ -636,14 +645,10 @@ else
   {
     if (myFFT.available()) 
     {
-      if (tx)
-      {
-      scale=4;  //orig was 1 for RX, 4 works ok for TX
-      }
-      else 
-      {
-      scale=1;
-      }
+
+     if (tx & cw) scale = 32; //orig was 1 for RX, 4 works ok for TX and 32 for CW TX
+     if (tx & !cw) scale = 4;
+     
        //for (int16_t x=0; x < 160; x++) 
        for (int16_t x=0; x < 160; x+=2) 
        {
